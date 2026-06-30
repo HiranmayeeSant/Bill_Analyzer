@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSEDCL Bill Savings Analyzer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f7f7f5;
+    color: #1a1a1a;
+    line-height: 1.5;
+  }
+  .app { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+  .header h1 { font-size: 22px; font-weight: 600; }
+  .header p { font-size: 13px; color: #666; margin-top: 4px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #d4f4dd; color: #1a7a3e; margin-left: 8px; vertical-align: middle; display: inline-block; font-weight: 500; }
+
+  .upload-zone { border: 1.5px dashed #c8c8c4; border-radius: 12px; padding: 2rem 1.5rem; text-align: center; background: #ffffff; cursor: pointer; transition: border-color 0.15s; margin: 1.5rem 0; }
+  .upload-zone:hover, .upload-zone.drag { border-color: #5b8def; background: #eef4ff; }
+  .upload-zone i { font-size: 32px; color: #999; display: block; margin-bottom: 0.5rem; }
+  .upload-zone p { font-size: 14px; color: #555; }
+  .upload-zone small { font-size: 12px; color: #999; }
+  #fileInput { display: none; }
+
+  .processing { display: flex; align-items: center; gap: 10px; padding: 0.9rem 1rem; background: #eef4ff; border-radius: 8px; margin-bottom: 1rem; }
+  .processing p { font-size: 13px; color: #3a5fc4; }
+  .spinner { width: 16px; height: 16px; border: 2px solid #c5d6f7; border-top-color: #3a5fc4; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-box { background: #fde8e8; border-radius: 8px; padding: 0.75rem 1rem; font-size: 13px; color: #c0392b; margin-bottom: 1rem; }
+
+  .result-card { background: #ffffff; border: 1px solid #e5e5e0; border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .rc-top { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; }
+  .avatar { width: 42px; height: 42px; border-radius: 50%; background: #eef4ff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #3a5fc4; flex-shrink: 0; }
+  .rc-name { font-size: 15px; font-weight: 600; }
+  .rc-num { font-size: 12px; color: #777; font-family: 'SF Mono', Consolas, monospace; margin-top: 2px; }
+  .bt-badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; margin-left: auto; flex-shrink: 0; }
+  .bt-HT { background: #fff3cd; color: #9a6700; border: 1px solid #f5dd90; }
+  .bt-LT { background: #d4f4dd; color: #1a7a3e; border: 1px solid #a8e6b8; }
+
+  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem; }
+  .metric { background: #fafaf8; border-radius: 8px; padding: 0.75rem; }
+  .metric .m-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
+  .metric .m-value { font-size: 17px; font-weight: 600; }
+  .metric.savings .m-value { color: #1a7a3e; }
+  .metric.pf .m-value { color: #3a5fc4; }
+
+  .status-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 0.6rem 0.75rem; background: #fafaf8; border-radius: 8px; flex-wrap: wrap; }
+  .sb-exceeded { color: #c0392b; }
+  .sb-ok { color: #1a7a3e; }
+
+  .section { margin-top: 1.75rem; }
+  .log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 10px; }
+  .log-title { font-size: 13px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.06em; }
+  .btn-export { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 7px; background: #1a7a3e; color: #fff; border: none; cursor: pointer; transition: opacity 0.15s; }
+  .btn-export:hover { opacity: 0.85; }
+  .btn-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 7px; background: #fff; color: #c0392b; border: 1px solid #f0c0c0; cursor: pointer; margin-left: 8px; transition: opacity 0.15s; }
+  .btn-clear:hover { opacity: 0.8; }
+
+  .log-wrap { overflow-x: auto; border: 1px solid #e5e5e0; border-radius: 12px; background: #fff; }
+  .log-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1000px; }
+  .log-table th { text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 600; color: #666; border-bottom: 1px solid #eee; background: #fafaf8; white-space: nowrap; }
+  .log-table td { padding: 10px 12px; border-bottom: 1px solid #f2f2f0; vertical-align: middle; white-space: nowrap; }
+  .log-table tr:last-child td { border-bottom: none; }
+  .log-table tr.new-row td { background: #eef4ff; }
+  .log-table tr:hover td { background: #fafaf8; }
+  .savings-cell { color: #1a7a3e; font-weight: 600; }
+  .exceeded-cell { color: #c0392b; font-size: 11px; }
+  .row-num { color: #aaa; font-family: 'SF Mono', Consolas, monospace; }
+
+  .empty-state { text-align: center; padding: 2.5rem; color: #999; font-size: 13px; }
+  .empty-state .icon { font-size: 32px; display: block; margin-bottom: 8px; }
+
+  .footer-note { font-size: 11px; color: #aaa; text-align: center; margin-top: 2rem; }
+
+  @media (max-width: 640px) {
+    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="header">
+    <h1>MSEDCL Bill Savings Analyzer <span class="badge">All Phases Complete</span></h1>
+    <p>Upload any MSEDCL electricity bill PDF. Results are saved to the log below and can be exported to Excel anytime.</p>
+  </div>
+
+  <div class="upload-zone" id="uploadZone">
+    <div style="font-size:32px;">📄</div>
+    <p>Drop your MSEDCL bill here, or <strong>click to browse</strong></p>
+    <small>PDF files only · Each upload adds a new row to the log</small>
+    <input type="file" id="fileInput" accept=".pdf" />
+  </div>
+
+  <div id="processingMsg" style="display:none" class="processing">
+    <div class="spinner"></div>
+    <p id="processingText">Loading PDF…</p>
+  </div>
+  <div id="errorBox" style="display:none" class="error-box"></div>
+  <div id="latestResult" style="display:none"></div>
+
+  <div class="section">
+    <div class="log-header">
+      <div class="log-title">Bill Log <span id="rowCount" style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;"></span></div>
+      <div style="display:flex;align-items:center;">
+        <button class="btn-export" onclick="exportExcel()">⬇ Export to Excel</button>
+        <button class="btn-clear" onclick="clearLog()">🗑 Clear</button>
+      </div>
+    </div>
+    <div class="log-wrap">
+      <table class="log-table" id="logTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Consumer Number</th>
+            <th>Consumer Name</th>
+            <th>Bill Type</th>
+            <th>CD (KVA)</th>
+            <th>KWH</th>
+            <th>KVAH</th>
+            <th>Energy Rate</th>
+            <th>75% CD</th>
+            <th>75% HD</th>
+            <th>CD Status</th>
+            <th>PF Savings</th>
+            <th>CD Savings</th>
+            <th>Total Savings</th>
+            <th>Uploaded</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer-note">All data stays in your browser (localStorage) — nothing is uploaded to any server. Clearing browser data will erase the log.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const STORAGE_KEY = 'msedcl_bill_log';
+let billLog = [];
+
+// ── LOAD / SAVE (browser localStorage — works on any hosted site) ───────────
+function loadLog() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) billLog = JSON.parse(raw);
+  } catch(e) { billLog = []; }
+}
+function saveLog() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(billLog)); }
+  catch(e) { console.error('Storage save failed', e); }
+}
+
+// ── PDF TEXT EXTRACTION ───────────────────────────────────────────────────────
+async function extractPageLines(page) {
+  const tc = await page.getTextContent();
+  const items = tc.items.filter(i => i.str && i.str.trim());
+  if (!items.length) return [];
+  const bands = {};
+  for (const item of items) {
+    const y = Math.round(item.transform[5]);
+    let key = null;
+    for (const k of Object.keys(bands)) { if (Math.abs(parseInt(k) - y) <= 4) { key = k; break; } }
+    if (!key) key = String(y);
+    if (!bands[key]) bands[key] = [];
+    bands[key].push({ x: item.transform[4], text: item.str.trim() });
+  }
+  const sortedYs = Object.keys(bands).map(Number).sort((a,b) => b - a);
+  return sortedYs.map(y => bands[y].sort((a,b) => a.x - b.x).map(i => i.text).join(' ').trim()).filter(Boolean);
+}
+
+// ── EXTRACTORS (deterministic, label-anchored) ────────────────────────────────
+function extractConsumerNumber(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/consumer\s*no\.?\s*:/i.test(lines[i])) continue;
+    const m = lines[i].match(/consumer\s*no\.?\s*:?\s*(\d{10,14})/i);
+    if (m) return m[1];
+    for (let j = i+1; j <= Math.min(i+4,lines.length-1); j++) { const m2 = lines[j].match(/\b(\d{12})\b/); if (m2) return m2[1]; }
+  }
+  return null;
+}
+function extractConsumerName(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/consumer\s*name\s*:/i.test(lines[i])) continue;
+    const rem = lines[i].replace(/consumer\s*name\s*:/i,'').trim();
+    if (rem.length > 2 && !/^\d+$/.test(rem)) return rem;
+    for (let j = i+1; j <= Math.min(i+4,lines.length-1); j++) {
+      const l = lines[j].trim();
+      if (!l || /^\d+$/.test(l) || /^(address|village|mobile|email|consumer|pin)/i.test(l)) continue;
+      if (/^(m\/s\.?|mr\.?|mrs\.?|dr\.?|shri|smt|ms\.?)/i.test(l) || /[a-zA-Z]{3,}/.test(l)) return l;
+    }
+  }
+  return null;
+}
+function extractContractDemand(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/contract\s*demand\s*\(kva\)/i.test(lines[i])) continue;
+    const m = lines[i].match(/contract\s*demand\s*\(kva\)\s*[:\s]+(\d+(?:\.\d+)?)/i) || lines[i].match(/:(\d+(?:\.\d+)?)/);
+    if (m) return parseFloat(m[1]);
+    for (let j = i+1; j <= Math.min(i+2,lines.length-1); j++) { const m2 = lines[j].match(/^(\d+(?:\.\d+)?)/); if (m2) return parseFloat(m2[1]); }
+  }
+  return null;
+}
+function extractTotalConsumption(lines) {
+  let s = -1;
+  for (let i = 0; i < lines.length; i++) { if (/current\s*consumption\s*details/i.test(lines[i])) { s = i; break; } }
+  if (s === -1) return { kwh: null, kvah: null };
+  for (let i = s+1; i < Math.min(s+35, lines.length); i++) {
+    if (!/total\s*consumption/i.test(lines[i])) continue;
+    const block = lines.slice(i, Math.min(i+3,lines.length)).join(' ');
+    const nums = [...block.matchAll(/(\d{3,8}(?:\.\d+)?)/g)].map(m => parseFloat(m[1]));
+    if (nums.length >= 2) return { kwh: nums[0], kvah: nums[1] };
+  }
+  return { kwh: null, kvah: null };
+}
+const CONSUMPTION_TYPES = ['public services','residential','commercial','industrial','agricultural','ltp','htp'];
+function extractEnergyChargeDetails(lines) {
+  let s = -1;
+  for (let i = 0; i < lines.length; i++) { if (/energy\s*charge\s*details/i.test(lines[i])) { s = i; break; } }
+  if (s === -1) return null;
+  const rows = [];
+  for (let i = s+1; i < Math.min(s+25,lines.length); i++) {
+    if (/electricity\s*duty|customer\s*care|terms\s*&|follow\s*us/i.test(lines[i])) break;
+    const typeMatch = CONSUMPTION_TYPES.find(t => new RegExp(t,'i').test(lines[i]));
+    if (!typeMatch) continue;
+    const combined = lines[i] + ' ' + (lines[i+1]||'');
+    const nums = [...combined.matchAll(/[\d,]+(?:\.\d+)?/g)].map(m => parseFloat(m[0].replace(/,/g,''))).filter(n => !isNaN(n) && n > 0);
+    const rate = nums.find(n => n >= 1 && n <= 30 && String(parseFloat(n.toFixed(2))) !== String(Math.round(n)));
+    const units = nums.find(n => n > 100 && n !== rate);
+    if (rate !== undefined && units !== undefined) rows.push({ type: typeMatch.replace(/\b\w/g,c=>c.toUpperCase()), units, rate });
+  }
+  if (!rows.length) return null;
+  return rows.reduce((b,r) => r.units > b.units ? r : b, rows[0]);
+}
+function extractBillingDemand(lines) {
+  let s = -1;
+  for (let i = 0; i < lines.length; i++) { if (/billing\s*demand/i.test(lines[i]) && !/review/i.test(lines[i])) { s = i; break; } }
+  if (s === -1) return { cd75: null, hd75: null, hd75Month: null };
+  const end = Math.min(s+20, lines.length);
+  let cd75 = null, hd75 = null, hd75Month = null;
+  for (let i = s; i < end; i++) {
+    const line = lines[i];
+    if (/75\s*%\s*of\s*cd/i.test(line)) {
+      const m = line.match(/75\s*%\s*of\s*cd[\s:]*(\d+(?:\.\d+)?)/i);
+      if (m) cd75 = parseFloat(m[1]);
+      else { for (let j = i+1; j <= Math.min(i+2,lines.length-1); j++) { const m2 = lines[j].match(/(\d{2,6}(?:\.\d+)?)/); if (m2 && !cd75) { cd75 = parseFloat(m2[1]); break; } } }
+    }
+    if (/75\s*%\s*(of\s*)?highest/i.test(line) || (/highest/i.test(line) && /preceding/i.test(line))) {
+      const m = line.match(/(\d+(?:\.\d+)?)\s*(?:\(([A-Z]{3})\))?/i);
+      if (m && parseFloat(m[1]) > 0) { hd75 = parseFloat(m[1]); hd75Month = m[2]||null; }
+      else { for (let j = i+1; j <= Math.min(i+2,lines.length-1); j++) { const m2 = lines[j].match(/(\d+(?:\.\d+)?)\s*(?:\(([A-Z]{3})\))?/i); if (m2 && parseFloat(m2[1]) > 0) { hd75 = parseFloat(m2[1]); hd75Month = m2[2]||null; break; } } }
+    }
+  }
+  return { cd75, hd75, hd75Month };
+}
+
+// ── CALCULATIONS ──────────────────────────────────────────────────────────────
+function calculateSavings(x) {
+  let pfSavings = null, cdSavings = null, totalSavings = null, cdExceeded = null, recommendedDemand = null, excessDemand = null;
+  if (x.kwh != null && x.kvah != null && x.energyRate != null) {
+    pfSavings = Math.round((x.kvah - x.kwh) * x.energyRate * 100) / 100;
+  }
+  if (x.cd75 != null && x.hd75 != null) {
+    cdExceeded = x.hd75 > x.cd75;
+    if (cdExceeded) { cdSavings = 0; }
+    else {
+      recommendedDemand = Math.round(x.hd75 * 1.15 * 100) / 100;
+      excessDemand = Math.round((x.cd75 - recommendedDemand) * 100) / 100;
+      cdSavings = excessDemand > 0 ? Math.round(excessDemand * 650 * 100) / 100 : 0;
+    }
+  }
+  if (pfSavings != null && cdSavings != null) totalSavings = Math.round((pfSavings + cdSavings) * 100) / 100;
+  return { pfSavings, cdSavings, totalSavings, cdExceeded, recommendedDemand, excessDemand };
+}
+
+// ── FORMAT HELPERS ────────────────────────────────────────────────────────────
+function fmtRs(n) { return n == null ? '—' : '₹' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtN(n, d=0) { return n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function initials(n) { return n ? n.replace(/^(m\/s\.?|mr\.?|mrs\.?|shri|smt|ms\.?)\s*/i,'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase() : '?'; }
+function esc(t) { return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function now() { return new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+
+// ── RENDER LOG TABLE ──────────────────────────────────────────────────────────
+function renderLog(newIdx) {
+  const tbody = document.getElementById('logBody');
+  document.getElementById('rowCount').textContent = billLog.length ? `(${billLog.length} bill${billLog.length > 1 ? 's' : ''})` : '';
+
+  if (!billLog.length) {
+    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state"><span class="icon">📥</span>No bills uploaded yet. Upload your first MSEDCL bill above.</div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = billLog.map((row, idx) => {
+    const isNew = idx === newIdx;
+    return `<tr class="${isNew ? 'new-row' : ''}">
+      <td class="row-num">${idx + 1}</td>
+      <td style="font-family:monospace">${esc(row.consumerNum || '—')}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;" title="${esc(row.consumerName||'')}">${esc(row.consumerName || '—')}</td>
+      <td>${row.billType ? `<span class="bt-badge bt-${row.billType}" style="font-size:11px;padding:2px 7px;border-radius:99px;">${row.billType}</span>` : '—'}</td>
+      <td>${fmtN(row.contractDemand)}</td>
+      <td>${fmtN(row.kwh)}</td>
+      <td>${fmtN(row.kvah)}</td>
+      <td>${row.energyRate != null ? '₹' + row.energyRate.toFixed(2) : '—'}</td>
+      <td>${fmtN(row.cd75)}</td>
+      <td>${row.hd75 != null ? fmtN(row.hd75) + (row.hd75Month ? ` (${row.hd75Month})` : '') : '—'}</td>
+      <td>${row.cdExceeded === true ? '<span class="exceeded-cell">⚠ Exceeded</span>' : row.cdExceeded === false ? '<span style="color:#1a7a3e;font-size:11px;">✓ OK</span>' : '—'}</td>
+      <td class="savings-cell">${fmtRs(row.pfSavings)}</td>
+      <td class="savings-cell">${fmtRs(row.cdSavings)}</td>
+      <td class="savings-cell" style="font-size:13px;">${fmtRs(row.totalSavings)}</td>
+      <td style="color:#aaa;font-size:11px;">${esc(row.uploadedAt)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── RENDER LATEST RESULT CARD ─────────────────────────────────────────────────
+function renderLatest(row) {
+  const el = document.getElementById('latestResult');
+  const s = row;
+  el.innerHTML = `
+    <div class="result-card">
+      <div class="rc-top">
+        <div class="avatar">${initials(s.consumerName)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="rc-name">${esc(s.consumerName||'—')}</div>
+          <div class="rc-num">${esc(s.consumerNum||'—')}</div>
+        </div>
+        ${s.billType ? `<span class="bt-badge bt-${s.billType}">${s.billType} · ${s.contractDemand} KVA</span>` : ''}
+      </div>
+      <div class="metrics-grid">
+        <div class="metric"><div class="m-label">KWH</div><div class="m-value">${fmtN(s.kwh)}</div></div>
+        <div class="metric"><div class="m-label">KVAH</div><div class="m-value">${fmtN(s.kvah)}</div></div>
+        <div class="metric pf"><div class="m-label">PF Savings</div><div class="m-value">${fmtRs(s.pfSavings)}</div></div>
+        <div class="metric savings"><div class="m-label">Total Savings</div><div class="m-value">${fmtRs(s.totalSavings)}</div></div>
+      </div>
+      <div class="status-row">
+        <span class="${s.cdExceeded ? 'sb-exceeded' : 'sb-ok'}">
+          ${s.cdExceeded === true ? '⚠ Contract Demand Exceeded — CD Savings = ₹0' : s.cdExceeded === false ? `✓ Within CD limit — CD Savings: ${fmtRs(s.cdSavings)}` : '— CD status unavailable'}
+        </span>
+        <span style="margin-left:auto;color:#999;font-size:11px;">Energy Rate: ${s.energyRate != null ? '₹' + s.energyRate.toFixed(2) + '/unit' : '—'}</span>
+      </div>
+    </div>`;
+  el.style.display = 'block';
+}
+
+// ── EXPORT TO EXCEL ───────────────────────────────────────────────────────────
+function exportExcel() {
+  if (!billLog.length) { alert('No bills to export yet.'); return; }
+  const headers = ['#','Consumer Number','Consumer Name','Bill Type','Contract Demand (KVA)','KWH','KVAH','Energy Rate (Rs/unit)','75% of CD (KVA)','75% Highest Demand (KVA)','HD Month','CD Status','PF Savings (Rs)','CD Savings (Rs)','Total Savings (Rs)','Uploaded At'];
+  const rows = billLog.map((r, i) => [
+    i+1, r.consumerNum||'', r.consumerName||'', r.billType||'',
+    r.contractDemand||'', r.kwh||'', r.kvah||'',
+    r.energyRate||'', r.cd75||'', r.hd75||'', r.hd75Month||'',
+    r.cdExceeded === true ? 'Exceeded' : r.cdExceeded === false ? 'OK' : '',
+    r.pfSavings||'', r.cdSavings||'', r.totalSavings||'', r.uploadedAt||''
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [4,18,30,10,18,12,12,18,14,20,10,12,16,16,16,20].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'MSEDCL Bill Analysis');
+  XLSX.writeFile(wb, `MSEDCL_Bill_Analysis_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+// ── CLEAR LOG ─────────────────────────────────────────────────────────────────
+function clearLog() {
+  if (!billLog.length) return;
+  if (!confirm(`Clear all ${billLog.length} bill(s) from the log? This cannot be undone.`)) return;
+  billLog = [];
+  saveLog();
+  document.getElementById('latestResult').style.display = 'none';
+  renderLog(null);
+}
+
+// ── MAIN UPLOAD HANDLING ──────────────────────────────────────────────────────
+document.getElementById('uploadZone').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('uploadZone').addEventListener('dragover', e => { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag'); });
+document.getElementById('uploadZone').addEventListener('dragleave', () => document.getElementById('uploadZone').classList.remove('drag'));
+document.getElementById('uploadZone').addEventListener('drop', e => { e.preventDefault(); document.getElementById('uploadZone').classList.remove('drag'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+
+function showError(msg) {
+  document.getElementById('errorBox').textContent = msg;
+  document.getElementById('errorBox').style.display = 'block';
+  document.getElementById('processingMsg').style.display = 'none';
+}
+
+async function processFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) { showError('Only PDF files are supported.'); return; }
+  document.getElementById('errorBox').style.display = 'none';
+  document.getElementById('processingMsg').style.display = 'flex';
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let allLines = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      document.getElementById('processingText').textContent = `Reading page ${i} of ${pdf.numPages}…`;
+      allLines = allLines.concat(await extractPageLines(await pdf.getPage(i)));
+    }
+    document.getElementById('processingText').textContent = 'Calculating savings…';
+
+    const consumerNum  = extractConsumerNumber(allLines);
+    const consumerName = extractConsumerName(allLines);
+    const contractDemand = extractContractDemand(allLines);
+    const consumption  = extractTotalConsumption(allLines);
+    const energyRow    = extractEnergyChargeDetails(allLines);
+    const bd           = extractBillingDemand(allLines);
+    const billType     = contractDemand != null ? (contractDemand > 200 ? 'HT' : 'LT') : null;
+
+    const x = {
+      kwh: consumption.kwh, kvah: consumption.kvah,
+      energyRate: energyRow?.rate ?? null,
+      cd75: bd.cd75, hd75: bd.hd75,
+    };
+    const s = calculateSavings(x);
+
+    const row = {
+      consumerNum, consumerName, contractDemand, billType,
+      kwh: consumption.kwh, kvah: consumption.kvah,
+      energyRate: energyRow?.rate ?? null,
+      energyType: energyRow?.type ?? null,
+      cd75: bd.cd75, hd75: bd.hd75, hd75Month: bd.hd75Month,
+      cdExceeded: s.cdExceeded,
+      pfSavings: s.pfSavings, cdSavings: s.cdSavings, totalSavings: s.totalSavings,
+      uploadedAt: now(),
+      filename: file.name,
+    };
+
+    billLog.push(row);
+    saveLog();
+
+    document.getElementById('processingMsg').style.display = 'none';
+    renderLatest(row);
+    renderLog(billLog.length - 1);
+    document.getElementById('fileInput').value = '';
+  } catch(err) {
+    showError('Could not parse PDF: ' + err.message);
+  }
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+loadLog();
+renderLog(null);
+</script>
+</body>
+</html>
