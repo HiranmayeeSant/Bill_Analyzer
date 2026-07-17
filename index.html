@@ -1,453 +1,244 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MSEDCL Bill Savings Analyzer</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f7f7f5; color: #1a1a1a; line-height: 1.5; }
-  .app { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
-  .header h1 { font-size: 22px; font-weight: 600; }
-  .header p { font-size: 13px; color: #666; margin-top: 4px; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #d4f4dd; color: #1a7a3e; margin-left: 8px; vertical-align: middle; display: inline-block; font-weight: 500; }
-  .upload-zone { border: 1.5px dashed #c8c8c4; border-radius: 12px; padding: 2rem 1.5rem; text-align: center; background: #fff; cursor: pointer; transition: border-color 0.15s; margin: 1.5rem 0; }
-  .upload-zone:hover, .upload-zone.drag { border-color: #5b8def; background: #eef4ff; }
-  .upload-zone .icon { font-size: 32px; display: block; margin-bottom: 0.5rem; }
-  .upload-zone p { font-size: 14px; color: #555; }
-  .upload-zone small { font-size: 12px; color: #999; }
-  #fileInput { display: none; }
-  .processing { display: flex; align-items: center; gap: 10px; padding: 0.9rem 1rem; background: #eef4ff; border-radius: 8px; margin-bottom: 1rem; }
-  .processing p { font-size: 13px; color: #3a5fc4; }
-  .spinner { width: 16px; height: 16px; border: 2px solid #c5d6f7; border-top-color: #3a5fc4; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .error-box { background: #fde8e8; border-radius: 8px; padding: 0.75rem 1rem; font-size: 13px; color: #c0392b; margin-bottom: 1rem; }
-  .alert-box { border-radius: 8px; padding: 0.65rem 1rem; font-size: 12px; display: flex; align-items: flex-start; gap: 8px; margin-bottom: 0.75rem; }
-  .alert-danger { background: #fde8e8; color: #c0392b; }
+/**
+ * PSDR (Permanent Security Deposit Refund) Calculator
+ * ----------------------------------------------------
+ * Fits alongside your existing Contract Demand / Power Factor savings modules.
+ *
+ * Expected input shape (adjust field names to match your existing extraction output):
+ *
+ * billData = {
+ *   supplyType: "HT" | "LT",
+ *
+ *   // HT fields
+ *   ifPaidUpto: Number,          // "If Paid Upto" amount from first page
+ *   lastMonthPayment: Number,    // "Last Month Payment" amount from first page
+ *
+ *   // LT fields
+ *   billingHistory: [            // Billing History table rows
+ *     { billAmount: Number, ... },
+ *     ...
+ *   ],
+ *
+ *   // Common
+ *   securityDepositHeld: Number  // "Security Deposit Held (Rs.)"
+ * }
+ */
 
-  /* Result card */
-  .result-card { background: #fff; border: 1px solid #e5e5e0; border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem; }
-  .rc-top { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #eee; flex-wrap: wrap; }
-  .avatar { width: 42px; height: 42px; border-radius: 50%; background: #eef4ff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #3a5fc4; flex-shrink: 0; }
-  .rc-name { font-size: 15px; font-weight: 600; }
-  .rc-num { font-size: 12px; color: #777; font-family: monospace; margin-top: 2px; }
-  .tariff-badge { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; margin-left: auto; flex-shrink: 0; }
-  .tb-industrial { background: #fff3cd; color: #9a6700; border: 1px solid #f5dd90; }
-  .tb-commercial { background: #eef4ff; color: #3a5fc4; border: 1px solid #c5d6f7; }
-  .tb-unknown { background: #fde8e8; color: #c0392b; border: 1px solid #f0c0c0; }
-  .metrics-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 1rem; }
-  .metric { background: #fafaf8; border-radius: 8px; padding: 0.75rem; }
-  .metric .m-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
-  .metric .m-value { font-size: 17px; font-weight: 600; }
-  .metric.savings .m-value { color: #1a7a3e; }
-  .metric.pf .m-value { color: #3a5fc4; }
-  .status-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 0.6rem 0.75rem; background: #fafaf8; border-radius: 8px; flex-wrap: wrap; }
-  .cd-reduce { color: #c0392b; }
-  .cd-increase { color: #1a7a3e; }
-  .cd-none { color: #999; }
+// Fixed Billing History window per MSEDCL bill format (LT consumers)
+const LT_BILLING_HISTORY_MONTHS = 13;
 
-  /* Log */
-  .section { margin-top: 1.75rem; }
-  .log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 10px; }
-  .log-title { font-size: 13px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: 0.06em; }
-  .btn-export { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 7px; background: #1a7a3e; color: #fff; border: none; cursor: pointer; transition: opacity 0.15s; }
-  .btn-export:hover { opacity: 0.85; }
-  .btn-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 7px; background: #fff; color: #c0392b; border: 1px solid #f0c0c0; cursor: pointer; margin-left: 8px; transition: opacity 0.15s; }
-  .btn-clear:hover { opacity: 0.8; }
-  .log-wrap { overflow-x: auto; border: 1px solid #e5e5e0; border-radius: 12px; background: #fff; }
-  .log-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1100px; }
-  .log-table th { text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 600; color: #666; border-bottom: 1px solid #eee; background: #fafaf8; white-space: nowrap; }
-  .log-table td { padding: 10px 12px; border-bottom: 1px solid #f2f2f0; vertical-align: middle; white-space: nowrap; }
-  .log-table tr:last-child td { border-bottom: none; }
-  .log-table tr.new-row td { background: #eef4ff; }
-  .log-table tr:hover td { background: #fafaf8; }
-  .savings-cell { color: #1a7a3e; font-weight: 600; }
-  .reduce-cell { color: #c0392b; font-size: 11px; }
-  .increase-cell { color: #1a7a3e; font-size: 11px; }
-  .optimal-cell { color: #999; font-size: 11px; }
-  .row-num { color: #aaa; font-family: monospace; }
-  .empty-state { text-align: center; padding: 2.5rem; color: #999; font-size: 13px; }
-  .footer-note { font-size: 11px; color: #aaa; text-align: center; margin-top: 2rem; }
-  @media (max-width: 640px) { .metrics-grid { grid-template-columns: repeat(2,1fr); } }
-</style>
-</head>
-<body>
-<div class="app">
-  <div class="header">
-    <h1>MSEDCL Bill Savings Analyzer <span class="badge">Final Version</span></h1>
-    <p>Upload any MSEDCL electricity bill PDF. Results are saved to the log and can be exported to Excel.</p>
-  </div>
-
-  <div class="upload-zone" id="uploadZone">
-    <span class="icon">📄</span>
-    <p>Drop your MSEDCL bill here, or <strong>click to browse</strong></p>
-    <small>PDF only · HT-I (Industrial) and HT-II (Commercial) tariffs supported · Each upload adds a new row</small>
-    <input type="file" id="fileInput" accept=".pdf" />
-  </div>
-
-  <div id="processingMsg" style="display:none" class="processing">
-    <div class="spinner"></div>
-    <p id="processingText">Loading PDF…</p>
-  </div>
-  <div id="errorBox" style="display:none" class="error-box"></div>
-  <div id="latestResult" style="display:none"></div>
-
-  <div class="section">
-    <div class="log-header">
-      <div class="log-title">Bill Log <span id="rowCount" style="color:#aaa;font-weight:400;text-transform:none;letter-spacing:0;margin-left:4px;"></span></div>
-      <div>
-        <button class="btn-export" onclick="exportExcel()">⬇ Export to Excel</button>
-        <button class="btn-clear" onclick="clearLog()">🗑 Clear</button>
-      </div>
-    </div>
-    <div class="log-wrap">
-      <table class="log-table">
-        <thead>
-          <tr>
-            <th>#</th><th>Consumer Number</th><th>Consumer Name</th><th>Tariff</th>
-            <th>CD (kVA)</th><th>KWH</th><th>KVAH</th><th>Energy Rate</th>
-            <th>HD75 (kVA)</th><th>RCD (kVA)</th><th>CD Action</th>
-            <th>PF Savings</th><th>CD Savings</th><th>Total Savings</th><th>Uploaded</th>
-          </tr>
-        </thead>
-        <tbody id="logBody"></tbody>
-      </table>
-    </div>
-  </div>
-  <div class="footer-note">All data stays in your browser (localStorage). Nothing is uploaded to any server. Export to Excel regularly to keep a backup.</div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script>
-const pdfjsLib = window['pdfjs-dist/build/pdf'];
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-const STORAGE_KEY = 'msedcl_bill_log_v2';
-let billLog = [];
-
-function loadLog() {
-  try { const r = localStorage.getItem(STORAGE_KEY); if (r) billLog = JSON.parse(r); } catch(e) { billLog = []; }
-}
-function saveLog() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(billLog)); } catch(e) {}
+// Returned whenever required fields are missing/unreadable — treated as
+// "no savings opportunity" rather than a hard error, since the consultant
+// workflow should never block on a single unreadable field.
+function noSavingsResult(supplyType, reason) {
+  return {
+    supplyType: supplyType || "UNKNOWN",
+    securityDepositHeld: null,
+    requiredDeposit: null,
+    difference: null,
+    psdrSavings: 0,
+    recommendation: "No PSDR savings opportunity found.",
+    dataIssue: reason, // internal/logging use — not shown to end user
+    calculationBasis: {},
+  };
 }
 
-async function extractPageLines(page) {
-  const tc = await page.getTextContent();
-  const items = tc.items.filter(i => i.str && i.str.trim());
-  if (!items.length) return [];
-  const bands = {};
-  for (const item of items) {
-    const y = Math.round(item.transform[5]);
-    let key = null;
-    for (const k of Object.keys(bands)) { if (Math.abs(parseInt(k) - y) <= 6) { key = k; break; } }
-    if (!key) key = String(y);
-    if (!bands[key]) bands[key] = [];
-    bands[key].push({ x: item.transform[4], text: item.str.trim() });
+function calculatePSDR(billData) {
+  const { supplyType, securityDepositHeld } = billData;
+
+  if (securityDepositHeld === undefined || securityDepositHeld === null) {
+    return noSavingsResult(supplyType, "Security Deposit Held (Rs.) not found on bill.");
   }
-  const sortedYs = Object.keys(bands).map(Number).sort((a,b) => b - a);
-  return sortedYs.map(y => bands[y].sort((a,b) => a.x - b.x).map(i => i.text).join(' ').trim()).filter(Boolean);
-}
 
-function extractConsumerNumber(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (!/consumer\s*no\.?\s*:/i.test(lines[i])) continue;
-    const m = lines[i].match(/consumer\s*no\.?\s*:?\s*(\d{10,14})/i);
-    if (m) return m[1];
-    for (let j = i+1; j <= Math.min(i+4,lines.length-1); j++) { const m2 = lines[j].match(/\b(\d{12})\b/); if (m2) return m2[1]; }
-  }
-  return null;
-}
-function extractConsumerName(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (!/consumer\s*name\s*:/i.test(lines[i])) continue;
-    const rem = lines[i].replace(/consumer\s*name\s*:/i,'').trim();
-    if (rem.length > 2 && !/^\d+$/.test(rem)) return rem;
-    for (let j = i+1; j <= Math.min(i+4,lines.length-1); j++) {
-      const l = lines[j].trim();
-      if (!l || /^\d+$/.test(l) || /^(address|village|mobile|email|consumer|pin)/i.test(l)) continue;
-      if (/^(m\/s\.?|mr\.?|mrs\.?|dr\.?|shri|smt|ms\.?)/i.test(l) || /[a-zA-Z]{3,}/.test(l)) return l;
-    }
-  }
-  return null;
-}
-function extractContractDemand(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (!/contract\s*demand\s*\(kva\)/i.test(lines[i])) continue;
-    const m = lines[i].match(/contract\s*demand\s*\(kva\)\s*[:\s]+(\d+(?:\.\d+)?)/i) || lines[i].match(/:(\d+(?:\.\d+)?)/);
-    if (m) return parseFloat(m[1]);
-    for (let j = i+1; j <= Math.min(i+2,lines.length-1); j++) { const m2 = lines[j].match(/^(\d+(?:\.\d+)?)/); if (m2) return parseFloat(m2[1]); }
-  }
-  return null;
-}
-function extractTotalConsumption(lines) {
-  let s = -1;
-  for (let i = 0; i < lines.length; i++) { if (/current\s*consumption\s*details/i.test(lines[i])) { s = i; break; } }
-  if (s === -1) return { kwh: null, kvah: null };
-  for (let i = s+1; i < Math.min(s+35,lines.length); i++) {
-    if (!/total\s*consumption/i.test(lines[i])) continue;
-    const block = lines.slice(i,Math.min(i+3,lines.length)).join(' ');
-    const nums = [...block.matchAll(/(\d{3,8}(?:\.\d+)?)/g)].map(m => parseFloat(m[1]));
-    if (nums.length >= 2) return { kwh: nums[0], kvah: nums[1] };
-  }
-  return { kwh: null, kvah: null };
-}
-function extractTariff(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (!/tariff\s*:/i.test(lines[i])) continue;
-    const combined = lines.slice(i,Math.min(i+3,lines.length)).join(' ');
-    const m = combined.match(/tariff\s*:?\s*(?:\d+\s*)?(HT-[A-Z0-9]+(?:\s+[A-Z])?)/i);
-    if (m) {
-      const code = m[1].trim().toUpperCase();
-      if (/^HT-I(?:[^I]|$)/.test(code) || code==='HT-I') return { raw:code, type:'industrial', label:'Industrial (HT-I)' };
-      if (/^HT-II/.test(code)) return { raw:code, type:'commercial', label:'Commercial (HT-II)' };
-      return { raw:code, type:'unknown', label:`Other — ${code}` };
-    }
-  }
-  return { raw:null, type:'unknown', label:'Tariff not found' };
-}
-const ALL_TYPES = ['public services','residential','commercial','industrial','agricultural','ltp','htp'];
-function extractEnergyRateByTariff(lines, tariffType) {
-  let s = -1;
-  for (let i = 0; i < lines.length; i++) { if (/energy\s*charge\s*details/i.test(lines[i])) { s = i; break; } }
-  if (s === -1) return null;
-  const rows = [];
-  for (let i = s+1; i < Math.min(s+25,lines.length); i++) {
-    if (/electricity\s*duty|customer\s*care|terms\s*&|follow\s*us/i.test(lines[i])) break;
-    const typeMatch = ALL_TYPES.find(t => new RegExp(t,'i').test(lines[i]));
-    if (!typeMatch) continue;
-    const combined = lines[i]+' '+(lines[i+1]||'');
-    const nums = [...combined.matchAll(/[\d,]+(?:\.\d+)?/g)].map(m => parseFloat(m[0].replace(/,/g,''))).filter(n => !isNaN(n) && n > 0);
-    const rate = nums.find(n => n>=1 && n<=30 && String(parseFloat(n.toFixed(2)))!==String(Math.round(n)));
-    if (rate!==undefined) rows.push({ type:typeMatch, rate });
-  }
-  if (!rows.length) return null;
-  const match = rows.find(r => r.type.toLowerCase()===tariffType);
-  return match ? match.rate : null;
-}
+  let requiredDeposit; // Y
+  let calculationBasis = {};
 
-// FIXED HD75 extractor — confirmed from real bill analysis:
-// HD75 value is always on the line containing "preceding 11months"
-// CD75 value is always on the line containing "75% of CD"
-function extractBillingDemand(lines) {
-  let sectionStart = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/billing\s*demand/i.test(lines[i]) && !/review|billed/i.test(lines[i])) { sectionStart = i; break; }
-  }
-  const searchLines = sectionStart >= 0 ? lines.slice(sectionStart, sectionStart+25) : lines;
-  let cd75 = null, hd75 = null, hd75Month = null;
-  for (let i = 0; i < searchLines.length; i++) {
-    const line = searchLines[i];
-    // HD75: on the "preceding 11months" line
-    if (/preceding\s*\d+\s*months?/i.test(line)) {
-      const m = line.match(/preceding\s*\d+\s*months?\s+(\d+(?:\.\d+)?)\s*(?:\(([A-Z]{3})\))?/i);
-      if (m && parseFloat(m[1]) > 0) { hd75 = parseFloat(m[1]); hd75Month = m[2]||null; }
-      if (!hd75) {
-        const nums = [...line.matchAll(/\b(\d{2,4}(?:\.\d+)?)\b/g)].map(m => parseFloat(m[1])).filter(n => n>20 && n<5000);
-        if (nums.length) hd75 = nums[0];
-        const monthM = line.match(/\(([A-Z]{3})\)/i);
-        if (monthM) hd75Month = monthM[1];
-      }
-    }
-    // Fallback: single-line format
-    if (!hd75 && /75\s*%.*highest.*preceding/i.test(line)) {
-      const m = line.match(/preceding\s*\d+\s*months?\s+(\d+(?:\.\d+)?)\s*(?:\(([A-Z]{3})\))?/i);
-      if (m && parseFloat(m[1]) > 0) { hd75 = parseFloat(m[1]); hd75Month = m[2]||null; }
-    }
-    // CD75: on the "75% of CD" line
-    if (/75\s*%\s*of\s*cd/i.test(line)) {
-      const m = line.match(/75\s*%\s*of\s*cd[\s:]*(\d+(?:\.\d+)?)/i);
-      if (m) { cd75 = parseFloat(m[1]); continue; }
-      for (let j = i+1; j < Math.min(i+3,searchLines.length); j++) {
-        const m2 = searchLines[j].match(/^(\d+(?:\.\d+)?)\s*$/);
-        if (m2) { cd75 = parseFloat(m2[1]); break; }
-      }
-    }
-  }
-  return { cd75, hd75, hd75Month };
-}
+  if (supplyType === "HT") {
+    const { ifPaidUpto, lastMonthPayment } = billData;
 
-function extractExcessDemandCharges(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    if (/charges\s*for\s*excess\s*demand/i.test(lines[i])) {
-      const combined = lines.slice(i,Math.min(i+3,lines.length)).join(' ');
-      const nums = [...combined.matchAll(/[\d,]+(?:\.\d+)?/g)].map(m => parseFloat(m[0].replace(/,/g,'')));
-      const val = nums.find(n => n >= 0);
-      if (val != null) return val;
-    }
-  }
-  return null;
-}
-
-function calculatePFSavings(kwh, kvah, rate) {
-  if (kwh==null||kvah==null||rate==null) return null;
-  return Math.round((kvah-kwh)*rate*100)/100;
-}
-function calculateCDSavings(cd, hd75, excessCharges) {
-  if (cd==null||hd75==null) return { action:null, rcd:null, savings:null };
-  const rcd = Math.round(hd75*1.5295*100)/100;
-  const diff = Math.round((cd-rcd)*100)/100;
-  if (Math.abs(diff)<=0.01) return { action:'none', rcd, savings:0, diff:0 };
-  if (cd>rcd) return { action:'reduce', rcd, diff, savings:Math.round(diff*0.75*650*100)/100 };
-  return { action:'increase', rcd, diff:Math.abs(diff), savings:excessCharges??null };
-}
-
-function fmtRs(n) { return n==null?'—':'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function fmtN(n,d=0) { return n==null?'—':n.toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d}); }
-function initials(n) { return n?n.replace(/^(m\/s\.?|mr\.?|mrs\.?|shri|smt|ms\.?)\s*/i,'').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase():'?'; }
-function esc(t) { return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function now() { return new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
-
-function renderLog(newIdx) {
-  const tbody = document.getElementById('logBody');
-  document.getElementById('rowCount').textContent = billLog.length?`(${billLog.length} bill${billLog.length>1?'s':''})`:'';
-  if (!billLog.length) {
-    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state">📥<br>No bills uploaded yet. Upload your first MSEDCL bill above.</div></td></tr>`;
-    return;
-  }
-  tbody.innerHTML = billLog.map((row,idx) => {
-    const isNew = idx===newIdx;
-    const cdCell = row.cdAction==='reduce'?`<span class="reduce-cell">↓ Reduce</span>`:row.cdAction==='increase'?`<span class="increase-cell">↑ Increase</span>`:row.cdAction==='none'?`<span class="optimal-cell">= Optimal</span>`:'—';
-    return `<tr class="${isNew?'new-row':''}">
-      <td class="row-num">${idx+1}</td>
-      <td style="font-family:monospace">${esc(row.consumerNum||'—')}</td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;" title="${esc(row.consumerName||'')}">${esc(row.consumerName||'—')}</td>
-      <td><span style="font-size:11px;padding:2px 6px;border-radius:99px;background:#f5f5f0;border:1px solid #e5e5e0;">${esc(row.tariffRaw||'—')}</span></td>
-      <td>${fmtN(row.contractDemand,2)}</td>
-      <td>${fmtN(row.kwh)}</td>
-      <td>${fmtN(row.kvah)}</td>
-      <td>${row.energyRate!=null?'₹'+row.energyRate.toFixed(2):'—'}</td>
-      <td>${row.hd75!=null?fmtN(row.hd75,2)+(row.hd75Month?` (${row.hd75Month})`:''): '—'}</td>
-      <td>${fmtN(row.rcd,2)}</td>
-      <td>${cdCell}</td>
-      <td class="savings-cell">${fmtRs(row.pfSavings)}</td>
-      <td class="savings-cell">${fmtRs(row.cdSavings)}</td>
-      <td class="savings-cell" style="font-size:13px;">${fmtRs(row.totalSavings)}</td>
-      <td style="color:#aaa;font-size:11px;">${esc(row.uploadedAt)}</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderLatest(row) {
-  const el = document.getElementById('latestResult');
-  const cdLabel = row.cdAction==='reduce'?'↓ Reduce Contract Demand':row.cdAction==='increase'?'↑ Increase Contract Demand':row.cdAction==='none'?'= No Change Required':'—';
-  const cdClass = row.cdAction==='reduce'?'cd-reduce':row.cdAction==='increase'?'cd-increase':'cd-none';
-  const tariffAlert = row.tariffType==='unknown'?`<div class="alert-box alert-danger">⚠ Tariff "${esc(row.tariffRaw||'not found')}" is neither HT-I nor HT-II — PF Savings could not be calculated.</div>`:'';
-  el.innerHTML = `
-    <div class="result-card">
-      <div class="rc-top">
-        <div class="avatar">${initials(row.consumerName)}</div>
-        <div style="flex:1;min-width:0"><div class="rc-name">${esc(row.consumerName||'—')}</div><div class="rc-num">${esc(row.consumerNum||'—')}</div></div>
-        <span class="tariff-badge tb-${row.tariffType||'unknown'}">${esc(row.tariffLabel||'—')}</span>
-      </div>
-      ${tariffAlert}
-      <div class="metrics-grid">
-        <div class="metric"><div class="m-label">KWH</div><div class="m-value">${fmtN(row.kwh)}</div></div>
-        <div class="metric"><div class="m-label">KVAH</div><div class="m-value">${fmtN(row.kvah)}</div></div>
-        <div class="metric pf"><div class="m-label">PF Savings</div><div class="m-value">${fmtRs(row.pfSavings)}</div></div>
-        <div class="metric savings"><div class="m-label">Total Savings</div><div class="m-value">${fmtRs(row.totalSavings)}</div></div>
-      </div>
-      <div class="status-row">
-        <span class="${cdClass}"><strong>${cdLabel}</strong>${row.rcd!=null?` (RCD = ${fmtN(row.rcd,2)} kVA)`:''}</span>
-        <span style="margin-left:auto;color:#999;font-size:11px;">CD Savings: ${fmtRs(row.cdSavings)}</span>
-      </div>
-    </div>`;
-  el.style.display = 'block';
-}
-
-function exportExcel() {
-  if (!billLog.length) { alert('No bills to export yet.'); return; }
-  const headers = ['#','Consumer Number','Consumer Name','Tariff','Tariff Type','Contract Demand (kVA)','KWH','KVAH','Energy Rate (₹/unit)','HD75 (kVA)','HD75 Month','RCD = HD75×1.5295 (kVA)','CD Action','PF Savings (₹)','CD Savings (₹)','Total Savings (₹)','Uploaded At'];
-  const rows = billLog.map((r,i) => [
-    i+1,r.consumerNum||'',r.consumerName||'',r.tariffRaw||'',r.tariffLabel||'',
-    r.contractDemand||'',r.kwh||'',r.kvah||'',r.energyRate||'',
-    r.hd75||'',r.hd75Month||'',r.rcd||'',
-    r.cdAction==='reduce'?'Reduce':r.cdAction==='increase'?'Increase':r.cdAction==='none'?'No Change':'',
-    r.pfSavings||'',r.cdSavings||'',r.totalSavings||'',r.uploadedAt||''
-  ]);
-  const ws = XLSX.utils.aoa_to_sheet([headers,...rows]);
-  ws['!cols'] = [4,18,30,10,18,14,12,12,16,12,10,16,12,16,16,16,20].map(w=>({wch:w}));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'MSEDCL Bill Analysis');
-  XLSX.writeFile(wb,`MSEDCL_Analysis_${new Date().toISOString().slice(0,10)}.xlsx`);
-}
-
-async function clearLog() {
-  if (!billLog.length) return;
-  if (!confirm(`Clear all ${billLog.length} bill(s)? This cannot be undone.`)) return;
-  billLog = []; saveLog();
-  document.getElementById('latestResult').style.display = 'none';
-  renderLog(null);
-}
-
-document.getElementById('uploadZone').addEventListener('click', () => document.getElementById('fileInput').click());
-document.getElementById('uploadZone').addEventListener('dragover', e => { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag'); });
-document.getElementById('uploadZone').addEventListener('dragleave', () => document.getElementById('uploadZone').classList.remove('drag'));
-document.getElementById('uploadZone').addEventListener('drop', e => { e.preventDefault(); document.getElementById('uploadZone').classList.remove('drag'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
-document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
-
-function showError(msg) {
-  document.getElementById('errorBox').textContent = msg;
-  document.getElementById('errorBox').style.display = 'block';
-  document.getElementById('processingMsg').style.display = 'none';
-}
-
-async function processFile(file) {
-  if (!file.name.toLowerCase().endsWith('.pdf')) { showError('Only PDF files supported.'); return; }
-  document.getElementById('errorBox').style.display = 'none';
-  document.getElementById('processingMsg').style.display = 'flex';
-  try {
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    let allLines = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      document.getElementById('processingText').textContent = `Reading page ${i} of ${pdf.numPages}…`;
-      allLines = allLines.concat(await extractPageLines(await pdf.getPage(i)));
-    }
-    document.getElementById('processingText').textContent = 'Calculating savings…';
-
-    const consumerNum    = extractConsumerNumber(allLines);
-    const consumerName   = extractConsumerName(allLines);
-    const contractDemand = extractContractDemand(allLines);
-    const consumption    = extractTotalConsumption(allLines);
-    const tariff         = extractTariff(allLines);
-    const bd             = extractBillingDemand(allLines);
-    const excessCharges  = extractExcessDemandCharges(allLines);
-
-    let energyRate = null;
-    if (tariff.type==='industrial'||tariff.type==='commercial') {
-      energyRate = extractEnergyRateByTariff(allLines, tariff.type);
+    if (ifPaidUpto === undefined || lastMonthPayment === undefined) {
+      return noSavingsResult(
+        supplyType,
+        "'If Paid Upto' and/or 'Last Month Payment' not found on bill."
+      );
     }
 
-    const pfSavings = calculatePFSavings(consumption.kwh, consumption.kvah, energyRate);
-    const cdResult  = calculateCDSavings(contractDemand, bd.hd75, excessCharges);
-    const totalSavings = pfSavings!=null && cdResult.savings!=null
-      ? Math.round((pfSavings+cdResult.savings)*100)/100 : null;
+    const greaterValue = Math.max(ifPaidUpto, lastMonthPayment);
+    requiredDeposit = greaterValue * 2;
 
-    const row = {
-      consumerNum, consumerName, contractDemand,
-      tariffRaw:tariff.raw, tariffType:tariff.type, tariffLabel:tariff.label,
-      kwh:consumption.kwh, kvah:consumption.kvah, energyRate,
-      hd75:bd.hd75, hd75Month:bd.hd75Month, rcd:cdResult.rcd,
-      cdAction:cdResult.action,
-      pfSavings, cdSavings:cdResult.savings, totalSavings,
-      uploadedAt:now(), filename:file.name,
+    calculationBasis = {
+      ifPaidUpto,
+      lastMonthPayment,
+      greaterValue,
+      formula: "Y = Greater(If Paid Upto, Last Month Payment) × 2",
     };
+  } else if (supplyType === "LT") {
+    const { billingHistory } = billData;
 
-    billLog.push(row);
-    saveLog();
-    document.getElementById('processingMsg').style.display = 'none';
-    renderLatest(row);
-    renderLog(billLog.length-1);
-    document.getElementById('fileInput').value = '';
-  } catch(err) {
-    showError('Could not parse PDF: ' + err.message);
+    if (!Array.isArray(billingHistory) || billingHistory.length === 0) {
+      return noSavingsResult(supplyType, "Billing History table not found or empty.");
+    }
+
+    // Use the most recent LT_BILLING_HISTORY_MONTHS rows if more are present;
+    // if fewer are available, use whatever was extracted.
+    const windowRows = billingHistory.slice(0, LT_BILLING_HISTORY_MONTHS);
+
+    const amounts = windowRows
+      .map((row) => row.billAmount)
+      .filter((val) => typeof val === "number" && !isNaN(val));
+
+    if (amounts.length === 0) {
+      return noSavingsResult(
+        supplyType,
+        "No valid Bill Amount values found in Billing History."
+      );
+    }
+
+    const averageBillAmount =
+      amounts.reduce((sum, val) => sum + val, 0) / amounts.length;
+    requiredDeposit = averageBillAmount * 2;
+
+    calculationBasis = {
+      monthsUsed: amounts.length,
+      monthsExpected: LT_BILLING_HISTORY_MONTHS,
+      averageBillAmount: round2(averageBillAmount),
+      formula: `Y = Average Bill Amount (last ${amounts.length} months) × 2`,
+    };
+  } else {
+    return noSavingsResult(supplyType, `Unrecognized supply type: "${supplyType}".`);
   }
+
+  const difference = securityDepositHeld - requiredDeposit;
+  const hasSavings = difference > 0;
+
+  return {
+    supplyType,
+    securityDepositHeld: round2(securityDepositHeld),
+    requiredDeposit: round2(requiredDeposit),
+    difference: round2(difference),
+    psdrSavings: hasSavings ? round2(difference) : 0,
+    recommendation: hasSavings
+      ? "Apply for Permanent Security Deposit Refund (PSDR)."
+      : "No PSDR savings opportunity found.",
+    calculationBasis,
+  };
 }
 
-loadLog();
-renderLog(null);
-</script>
-</body>
-</html>
+function round2(num) {
+  return Math.round(num * 100) / 100;
+}
+
+/**
+ * Formats the result to match your specified output block.
+ */
+function formatPSDROutput(result) {
+  if (result.error) {
+    return `PSDR Analysis Error: ${result.error}`;
+  }
+
+  const lines = [
+    `Supply Type:`,
+    `${result.supplyType}`,
+    ``,
+    `Security Deposit Held:`,
+    `₹${result.securityDepositHeld}`,
+    ``,
+    `Y (Required Security Deposit):`,
+    `₹${result.requiredDeposit}`,
+    ``,
+    `PSDR Savings:`,
+    `₹${result.psdrSavings}`,
+    ``,
+    `Recommendation:`,
+    result.psdrSavings > 0
+      ? `Apply for Permanent Security Deposit Refund (PSDR).\n\nEstimated Refund = ₹${result.psdrSavings}`
+      : `No PSDR savings opportunity found.`,
+  ];
+
+  return lines.join("\n");
+}
+
+/**
+ * Wires a PSDR result into the shared recommendation-engine format used by
+ * the CD and PF savings modules:
+ *   Observation → Root Cause → Recommended Action → Expected ₹ Impact →
+ *   Confidence → Urgency
+ *
+ * Returns null when there's no PSDR opportunity, so it can be filtered out
+ * of the "active recommendations" list the same way a null/zero CD or PF
+ * recommendation would be.
+ *
+ * Note: unlike CD/PF, PSDR is a one-time refund, not a recurring monthly
+ * saving — flag it as such (isRecurring: false) so it's kept in a separate
+ * bucket from your annualized savings total in reports/dashboards.
+ */
+function buildPSDRRecommendation(billData) {
+  const result = calculatePSDR(billData);
+
+  if (!result.psdrSavings || result.psdrSavings <= 0) {
+    return null;
+  }
+
+  const { supplyType, securityDepositHeld, requiredDeposit, calculationBasis } = result;
+
+  const basisText =
+    supplyType === "HT"
+      ? `required deposit is based on 2× the greater of "If Paid Upto" (₹${calculationBasis.ifPaidUpto}) and "Last Month Payment" (₹${calculationBasis.lastMonthPayment})`
+      : `required deposit is based on 2× the average bill amount over the last ${calculationBasis.monthsUsed} month(s) of Billing History (₹${calculationBasis.averageBillAmount}/month avg)`;
+
+  return {
+    service: "PSDR",
+    isRecurring: false, // one-time refund — exclude from annualized savings totals
+    observation: `Security Deposit Held (₹${securityDepositHeld}) exceeds the required deposit of ₹${requiredDeposit} for this ${supplyType} connection.`,
+    rootCause: `Under MSEDCL norms, the ${basisText}. The deposit currently held is higher than this requirement, indicating an excess balance.`,
+    recommendedAction:
+      "Apply for a Permanent Security Deposit Refund (PSDR) with MSEDCL to recover the excess amount held.",
+    expectedImpact: {
+      amount: result.psdrSavings,
+      label: `₹${result.psdrSavings} one-time refund`,
+    },
+    confidence: "High", // deterministic calculation from bill-stated figures
+    urgency: "Low", // no penalty accrues from delay, but capital sits idle until claimed
+    calculationBasis,
+  };
+}
+
+/**
+ * Convenience: merge PSDR alongside CD/PF recommendation builders.
+ * Assumes buildCDRecommendation(billData) and buildPFRecommendation(billData)
+ * already exist in your codebase and follow the same shape
+ * (service, isRecurring, observation, rootCause, recommendedAction,
+ * expectedImpact, confidence, urgency).
+ *
+ * Example:
+ *
+ * function buildAllRecommendations(billData) {
+ *   return [
+ *     buildCDRecommendation(billData),
+ *     buildPFRecommendation(billData),
+ *     buildPSDRRecommendation(billData),
+ *   ].filter(Boolean); // drop nulls where no opportunity exists
+ * }
+ */
+
+// Example usage:
+//
+// const htBill = {
+//   supplyType: "HT",
+//   ifPaidUpto: 450000,
+//   lastMonthPayment: 470000,
+//   securityDepositHeld: 1200000
+// };
+// console.log(formatPSDROutput(calculatePSDR(htBill)));
+//
+// const ltBill = {
+//   supplyType: "LT",
+//   billingHistory: [
+//     { billAmount: 85000 },
+//     { billAmount: 92000 },
+//     { billAmount: 78000 },
+//   ],
+//   securityDepositHeld: 250000
+// };
+// console.log(formatPSDROutput(calculatePSDR(ltBill)));
+
+export { calculatePSDR, formatPSDROutput, buildPSDRRecommendation };
